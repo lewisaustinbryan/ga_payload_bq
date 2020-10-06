@@ -1,0 +1,97 @@
+<script>
+
+    (function(){
+      
+      //At any moment in time we can collect all google-analytics payload requests; 
+      //with the exception that that moment in time is limited to the time in which we can collect objects in GTM -- which is limited to events. 
+      //One event might have more than one payload request associated to it or the timings in which the payload request is sent
+      // and the event happening in GA may be different. 
+      //The solution is to send all requests that happened in the browser whenever the payload exceeds the value -- 
+      //Most of the times this won't be needed because this will only happen if there are two events 
+      //that happen before the browser has refresed that exceed the payload. 
+      //It may also be worth limiting what payloads are looked at in the Network by Product level custom dimensions (ecommerce)
+      // since this tends to be the most likelt offender -- then trigger on ecommerce events; 
+      //but you could just trigger on all events except for 'gtm' ones (regex ^((?!gtm\.).)*$).    
+      
+      //Edit variables for testing ----------------------------------------------------------------------------------------------------------------------->
+      
+      projectId = "project-id"
+      cloudFunctionName = "cloud-function-name"
+      googleCloudPlatformHttp = "https://"+projectId+".cloudfunctions.net/"+cloudFunctionName
+      payloadLimitation = 8000 // maximum is 8000 bytes -- make lower to test
+      // edit below to limit the paramters allowed from the payload -- If none then 'payloadParameterRegex' must be 'null'. 'payloadParameterRegex' must an instanceof RegExp 
+      //products = "cd14|cd15|cd16|cd17|cd18|cd19|cd20|cd21|cd22|cd23|cd24|cd25|cd26|cd27|cd28|cd29|cd30|cd31|cd32|cd33|cd34|cd35"
+      //var payloadParameterRegex = new RegExp(products)
+      payloadParameterRegex = null
+      //<---------------------------------------------------------------------------------------------------------------------------------------------------
+      
+      //Do not edit below this line unless you have intention to change requests send to cloud function 'get_payload_from_gtm_and_push_to_bq-1'.
+	  	function get_payload() {
+			try {
+                var	network = performance.getEntriesByType("resource"), //Gets all the network requests in browser
+                eachUrlRequest;
+                payloadObj = {};
+                if (payloadParameterRegex instanceof RegExp) {// Check  if 'payloadParameterRegex' is an instanceof RegExp and use it to limit network requests
+                    for (eachUrlRequest = 0; eachUrlRequest < network.length; eachUrlRequest++) { // 
+                        if (
+                              network[eachUrlRequest].name.includes("collect?") &&     
+                              network[eachUrlRequest].name.includes("https://www.google-analytics.com") &&
+                              payloadParameterRegex.test(network[eachUrlRequest].name)
+                        ) {
+                          payloadObj[eachUrlRequest] = network[eachUrlRequest].name;
+                        } else {continue}
+                    }
+                } else { // get All google-anaytics network requests
+                    for (eachUrlRequest = 0; eachUrlRequest < network.length; eachUrlRequest++) { 
+                        if (network[eachUrlRequest].name.includes("collect?") && network[eachUrlRequest].name.includes("https://www.google-analytics.com")) {
+                          payloadObj[eachUrlRequest] = network[eachUrlRequest].name;
+                        } else {continue}
+                    }
+                 }
+              //Create an array of each payload request with relavent information
+              payloadArr = [];
+              for (var payload in payloadObj) {
+                  if (payloadObj.hasOwnProperty(payload)) {
+                      payloadArr.push({
+                          "event" : {{Event}}, //GTM Var
+                          "date" : new Date().getTime(),
+                          "page" : {{Page Path}}, //GTM Var
+                          "payload" : payloadObj[payload],
+                          "length" : payloadObj[payload].length
+                      })
+                  }
+              }
+			  return payloadArr
+		    } catch(e) {"Couldn't get Payload: " + e};
+		};
+
+	   	function post(url, json) { // POST method for sending http request to cloud function
+	    	var xhttp = new XMLHttpRequest();
+	  		xhttp.open("POST", url, true);
+	        xhttp.onreadystatechange = function() {
+	        	if (this.readyState == 4 && this.status == 200) {}  
+	        };
+			xhttp.send(JSON.stringify(json));
+	    };
+        
+        //If the paylaod exceeds the limit send to gcp
+        var payload = get_payload()
+        console.log(payload)
+        for (eachPayload = 0; eachPayload < payload.length; eachPayload++) {
+            if (payload[eachPayload]["length"] > payloadLimitation) {
+                console.log("The following Google Analytics payload request will not be sent to GA because it exceeds the number of bytes allowed in a measurement protocol request:")
+                console.log(payload[eachPayload].payload)
+                console.log("Instead this payload will be sent to Bigquery")
+                try {
+                  post(googleCloudPlatformHttp, payload[eachPayload]);
+                  console.log("Data sent to table ga_tables.paylaod in Bigquery via cloud function '"+cloudFunctionName+"' because paylaod length exceeds limitiation.")  
+                } catch(e) {"Failed to post payload object to gcp: " + e}	
+            } else {
+              return null
+            }     
+        }  
+    })();
+
+</script>
+  
+  
