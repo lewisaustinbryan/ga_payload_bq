@@ -1,0 +1,10 @@
+{
+  "name": "payload-logging",
+  "version": "0.0.4",
+  "engines": {
+      "node": "^10.00.0"
+    },
+  "dependencies": {
+    "@google-cloud/bigquery": "^2.0.1"
+  }
+}
